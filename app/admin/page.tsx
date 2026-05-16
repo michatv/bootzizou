@@ -115,7 +115,7 @@ const sidebarItems = [
   { icon: Users, label: "Users", id: "users" },
   { icon: DollarSign, label: "Withdrawals", id: "withdrawals" },
   { icon: BarChart3, label: "Analytics", id: "analytics" },
-  { icon: PlayCircle, label: "Ads", id: "ads" },
+  { icon: PlayCircle, label: "Videos", id: "videos" },
   { icon: PlayCircle, label: "Ad Networks", id: "adnetworks" },
   { icon: Settings, label: "Settings", id: "settings" },
 ]
@@ -438,7 +438,7 @@ export default function AdminPanel() {
             />
           )}
           {activeSection === "analytics" && <AnalyticsContent users={users} withdrawals={withdrawals} />}
-          {activeSection === "ads" && <AdsContent />}
+          {activeSection === "videos" && <VideosContent showNotification={showNotification} />}
           {activeSection === "adnetworks" && <AdNetworksContent />}
           {activeSection === "settings" && <SettingsContent settings={settings} onUpdateSettings={updateSettings} onChangePassword={async (cur, nw) => {
             const res = await fetch("/api/admin/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: cur, newPassword: nw }) })
@@ -1023,66 +1023,233 @@ function AnalyticsContent({ users, withdrawals }: { users: User[], withdrawals: 
   )
 }
 
-function AdsContent() {
-  const ads = [
-    { id: 1, name: "Crypto Exchange Pro", impressions: "45.2K", clicks: "2.3K", revenue: "$1,240", status: "active" },
-    { id: 2, name: "DeFi Wallet Ad", impressions: "32.8K", clicks: "1.8K", revenue: "$890", status: "active" },
-    { id: 3, name: "NFT Marketplace", impressions: "28.1K", clicks: "1.2K", revenue: "$650", status: "paused" },
-    { id: 4, name: "Trading Course", impressions: "19.5K", clicks: "0.9K", revenue: "$420", status: "active" },
-  ]
+interface VideoItem {
+  id: string
+  title: string
+  company: string
+  youtube_url: string
+  reward: number
+  duration: number
+  active: boolean
+  created_at: string
+}
+
+function VideosContent({ showNotification }: { showNotification: (type: "success" | "error", message: string) => void }) {
+  const [videos, setVideos] = useState<VideoItem[]>([])
+  const [loading, setLoading] = useState(true)
+  const [showAddDialog, setShowAddDialog] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [form, setForm] = useState({ title: "", company: "", youtube_url: "", reward: "0.05", duration: "30" })
+
+  const load = async () => {
+    setLoading(true)
+    try {
+      const res = await fetch("/api/admin/videos")
+      const data = await res.json()
+      if (data.videos) setVideos(data.videos)
+    } catch { showNotification("error", "Failed to load videos") }
+    setLoading(false)
+  }
+
+  useEffect(() => { load() }, [])
+
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (!form.youtube_url || !form.title) return
+    setSaving(true)
+    try {
+      const res = await fetch("/api/admin/videos", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      })
+      const data = await res.json()
+      if (data.success) {
+        showNotification("success", "Video added successfully")
+        setForm({ title: "", company: "", youtube_url: "", reward: "0.05", duration: "30" })
+        setShowAddDialog(false)
+        load()
+      } else {
+        showNotification("error", data.error || "Failed to add video")
+      }
+    } catch { showNotification("error", "Failed to add video") }
+    setSaving(false)
+  }
+
+  const handleToggle = async (id: string, active: boolean) => {
+    try {
+      await fetch("/api/admin/videos", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id, active }),
+      })
+      setVideos(prev => prev.map(v => v.id === id ? { ...v, active } : v))
+      showNotification("success", active ? "Video activated" : "Video paused")
+    } catch { showNotification("error", "Failed to update") }
+  }
+
+  const handleDelete = async (id: string) => {
+    try {
+      await fetch(`/api/admin/videos?id=${id}`, { method: "DELETE" })
+      setVideos(prev => prev.filter(v => v.id !== id))
+      showNotification("success", "Video deleted")
+    } catch { showNotification("error", "Failed to delete") }
+  }
+
+  const extractThumb = (url: string) => {
+    try {
+      const u = new URL(url)
+      let vid = u.searchParams.get("v")
+      if (!vid && u.hostname === "youtu.be") vid = u.pathname.slice(1)
+      if (vid) return `https://img.youtube.com/vi/${vid}/mqdefault.jpg`
+    } catch {}
+    return null
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h3 className="text-lg font-semibold">Ad Campaigns</h3>
-          <p className="text-sm text-muted-foreground">Manage your advertising campaigns</p>
+          <h3 className="text-lg font-semibold">Company Videos</h3>
+          <p className="text-sm text-muted-foreground">
+            Manage videos shown to users in the Earn screen · {videos.filter(v => v.active).length} active · {videos.length} total
+          </p>
         </div>
-        <Button className="primary-gradient">+ Add Campaign</Button>
+        <Button className="primary-gradient" onClick={() => setShowAddDialog(true)}>+ Add Video</Button>
       </div>
 
-      <Card className="glass-card">
-        <CardContent className="p-0">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Campaign</TableHead>
-                <TableHead>Impressions</TableHead>
-                <TableHead>Clicks</TableHead>
-                <TableHead>Revenue</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {ads.map((ad) => (
-                <TableRow key={ad.id}>
-                  <TableCell className="font-medium">{ad.name}</TableCell>
-                  <TableCell>{ad.impressions}</TableCell>
-                  <TableCell>{ad.clicks}</TableCell>
-                  <TableCell className="text-success">{ad.revenue}</TableCell>
-                  <TableCell>
-                    <Badge
-                      variant="outline"
-                      className={cn(
-                        ad.status === "active" && "border-success text-success",
-                        ad.status === "paused" && "border-primary text-primary"
-                      )}
-                    >
-                      {ad.status}
+      {loading ? (
+        <Card className="glass-card"><CardContent className="p-8 text-center text-muted-foreground">Loading...</CardContent></Card>
+      ) : videos.length === 0 ? (
+        <Card className="glass-card">
+          <CardContent className="p-12 text-center">
+            <PlayCircle className="h-14 w-14 text-muted-foreground/30 mx-auto mb-4" />
+            <p className="font-medium text-foreground mb-1">No videos yet</p>
+            <p className="text-sm text-muted-foreground mb-4">Add company videos that users will watch to earn USDT</p>
+            <Button className="primary-gradient" onClick={() => setShowAddDialog(true)}>+ Add First Video</Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          {videos.map((v) => {
+            const thumb = extractThumb(v.youtube_url)
+            return (
+              <Card key={v.id} className={cn("glass-card overflow-hidden", !v.active && "opacity-60")}>
+                <div className="relative h-36 bg-secondary">
+                  {thumb ? (
+                    <img src={thumb} alt={v.title} className="h-full w-full object-cover" />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center">
+                      <PlayCircle className="h-10 w-10 text-muted-foreground/40" />
+                    </div>
+                  )}
+                  <div className="absolute bottom-2 right-2">
+                    <Badge className={v.active ? "bg-success text-white border-0" : "bg-secondary text-muted-foreground"}>
+                      {v.active ? "Active" : "Paused"}
                     </Badge>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <Button variant="ghost" size="sm">
-                      <Settings className="h-4 w-4" />
+                  </div>
+                </div>
+                <CardContent className="p-4 space-y-2">
+                  <p className="font-semibold text-foreground line-clamp-1">{v.title}</p>
+                  {v.company && <p className="text-xs text-muted-foreground">{v.company}</p>}
+                  <div className="flex items-center gap-3 text-sm">
+                    <span className="text-primary font-medium">+${v.reward.toFixed(2)} USDT</span>
+                    <span className="text-muted-foreground">{v.duration}s</span>
+                  </div>
+                  <div className="flex gap-2 pt-1">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="flex-1"
+                      onClick={() => handleToggle(v.id, !v.active)}
+                    >
+                      {v.active ? "Pause" : "Activate"}
                     </Button>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => handleDelete(v.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Add Video Dialog */}
+      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+        <DialogContent className="glass-card border-primary/20 max-w-md">
+          <DialogHeader>
+            <DialogTitle>Add Company Video</DialogTitle>
+            <DialogDescription>Paste a YouTube link. Users will watch it and earn USDT.</DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleAdd} className="space-y-4">
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Video Title *</label>
+              <Input
+                placeholder="e.g. Crypto Exchange Tutorial"
+                value={form.title}
+                onChange={e => setForm(p => ({ ...p, title: e.target.value }))}
+                className="bg-secondary/50"
+                required
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Company / Brand Name</label>
+              <Input
+                placeholder="e.g. CoinEx"
+                value={form.company}
+                onChange={e => setForm(p => ({ ...p, company: e.target.value }))}
+                className="bg-secondary/50"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium">YouTube URL *</label>
+              <Input
+                placeholder="https://youtube.com/watch?v=..."
+                value={form.youtube_url}
+                onChange={e => setForm(p => ({ ...p, youtube_url: e.target.value }))}
+                className="bg-secondary/50"
+                required
+              />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Reward (USDT)</label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.reward}
+                  onChange={e => setForm(p => ({ ...p, reward: e.target.value }))}
+                  className="bg-secondary/50"
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Duration (sec)</label>
+                <Input
+                  type="number"
+                  min="5"
+                  value={form.duration}
+                  onChange={e => setForm(p => ({ ...p, duration: e.target.value }))}
+                  className="bg-secondary/50"
+                />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setShowAddDialog(false)}>Cancel</Button>
+              <Button type="submit" className="primary-gradient" disabled={saving || !form.youtube_url || !form.title}>
+                {saving ? "Saving..." : "Add Video"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
