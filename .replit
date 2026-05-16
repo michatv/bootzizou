@@ -1,0 +1,42 @@
+modules = ["nodejs-20"]
+[nix]
+channel = "stable-25_05"
+
+[agent]
+expertMode = true
+stack = "BEST_EFFORT_FALLBACK"
+
+[userenv]
+
+[userenv.shared]
+NEXT_PUBLIC_SUPABASE_URL = "https://xzqgwnxwkrkqrdlbxdsx.supabase.co"
+NEXT_PUBLIC_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh6cWd3bnh3a3JrcXJkbGJ4ZHN4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Nzg5Mjg5NDAsImV4cCI6MjA5NDUwNDk0MH0.nUqec_LzoeNy1Ioz9ygGjZJs5r-5KjUWs2xsoshGj5c"
+SUPABASE_SERVICE_ROLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inh6cWd3bnh3a3JrcXJkbGJ4ZHN4Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3ODkyODk0MCwiZXhwIjoyMDk0NTA0OTQwfQ.EDGt2d5EKdQ-QFQBmWUtOdGz8z0rmYGd47Laomp7k_c"
+
+[workflows]
+runButton = "Project"
+
+[[workflows.workflow]]
+name = "Project"
+mode = "parallel"
+author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "workflow.run"
+args = "Start application"
+
+[[workflows.workflow]]
+name = "Start application"
+author = "agent"
+
+[workflows.workflow.metadata]
+outputType = "webview"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm run dev -- --port 5000 -H 0.0.0.0"
+waitForPort = 5000
+
+[[ports]]
+localPort = 5000
+externalPort = 80

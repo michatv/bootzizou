@@ -443,9 +443,10 @@ export default function AdminPanel() {
           {activeSection === "settings" && <SettingsContent settings={settings} onUpdateSettings={updateSettings} onChangePassword={async (cur, nw) => {
             const res = await fetch("/api/admin/change-password", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ currentPassword: cur, newPassword: nw }) })
             const d = await res.json()
-            if (d.success) showNotification("success", "Password changed successfully")
-            else showNotification("error", d.error || "Failed to change password")
-            return d.success
+            if (d.success) { showNotification("success", "Password changed successfully"); return { ok: true } }
+            if (d.error === "setup_required") return { ok: false, sql: d.sql }
+            showNotification("error", d.error || "Failed to change password")
+            return { ok: false }
           }} />}
         </div>
       </main>
@@ -1089,7 +1090,7 @@ function AdsContent() {
 interface SettingsContentProps {
   settings: AppSettings
   onUpdateSettings: (settings: Partial<AppSettings>) => void
-  onChangePassword: (current: string, newPass: string) => Promise<boolean>
+  onChangePassword: (current: string, newPass: string) => Promise<{ ok: boolean; sql?: string }>
 }
 
 function SettingsContent({ settings, onUpdateSettings, onChangePassword }: SettingsContentProps) {
@@ -1104,19 +1105,23 @@ function SettingsContent({ settings, onUpdateSettings, onChangePassword }: Setti
   const [pwdError, setPwdError] = useState("")
   const [pwdSaving, setPwdSaving] = useState(false)
   const [pwdSuccess, setPwdSuccess] = useState(false)
+  const [pwdSetupSql, setPwdSetupSql] = useState<string | null>(null)
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault()
     setPwdError("")
     setPwdSuccess(false)
+    setPwdSetupSql(null)
     if (newPwd.length < 8) { setPwdError("New password must be at least 8 characters"); return }
     if (newPwd !== confirmPwd) { setPwdError("Passwords do not match"); return }
     setPwdSaving(true)
-    const ok = await onChangePassword(currentPwd, newPwd)
+    const result = await onChangePassword(currentPwd, newPwd)
     setPwdSaving(false)
-    if (ok) {
+    if (result.ok) {
       setPwdSuccess(true)
       setCurrentPwd(""); setNewPwd(""); setConfirmPwd("")
+    } else if (result.sql) {
+      setPwdSetupSql(result.sql)
     } else {
       setPwdError("Failed — check your current password")
     }
@@ -1174,6 +1179,18 @@ function SettingsContent({ settings, onUpdateSettings, onChangePassword }: Setti
             </div>
             {pwdError && <p className="text-sm text-destructive flex items-center gap-1"><AlertTriangle className="h-3 w-3" />{pwdError}</p>}
             {pwdSuccess && <p className="text-sm text-success flex items-center gap-1"><CheckCircle2 className="h-3 w-3" />Password changed successfully!</p>}
+            {pwdSetupSql && (
+              <div className="rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-2">
+                <p className="text-sm font-medium text-warning flex items-center gap-2">
+                  <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+                  Database table missing. Run this SQL in your Supabase SQL Editor, then try again:
+                </p>
+                <pre className="text-xs bg-secondary/80 p-3 rounded overflow-auto text-foreground whitespace-pre-wrap">{pwdSetupSql}</pre>
+                <Button size="sm" variant="outline" type="button" onClick={() => navigator.clipboard.writeText(pwdSetupSql)}>
+                  Copy SQL
+                </Button>
+              </div>
+            )}
             <Button type="submit" className="primary-gradient" disabled={pwdSaving || !currentPwd || !newPwd || !confirmPwd}>
               {pwdSaving ? "Saving..." : "Change Password"}
             </Button>
@@ -1532,6 +1549,59 @@ function SettingsContent({ settings, onUpdateSettings, onChangePassword }: Setti
 
 function AdNetworksContent() {
   const [activeNetwork, setActiveNetwork] = useState<string | null>(null)
+  const [networkStatuses, setNetworkStatuses] = useState<Record<string, boolean>>({})
+  const [fieldValues, setFieldValues] = useState<Record<string, Record<string, string>>>({})
+  const [saving, setSaving] = useState<string | null>(null)
+  const [setupSql, setSetupSql] = useState<string | null>(null)
+  const [isLoadingNets, setIsLoadingNets] = useState(true)
+
+  useEffect(() => {
+    fetch("/api/admin/ad-networks")
+      .then(r => r.json())
+      .then(d => {
+        if (d.configs) {
+          const statuses: Record<string, boolean> = {}
+          const values: Record<string, Record<string, string>> = {}
+          for (const [id, cfg] of Object.entries(d.configs)) {
+            statuses[id] = true
+            values[id] = cfg as Record<string, string>
+          }
+          setNetworkStatuses(statuses)
+          setFieldValues(values)
+        }
+        if (d.error === "setup_required") setSetupSql(d.sql)
+      })
+      .catch(() => {})
+      .finally(() => setIsLoadingNets(false))
+  }, [])
+
+  const handleConnect = async (networkId: string) => {
+    setSaving(networkId)
+    const res = await fetch("/api/admin/ad-networks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ networkId, fields: fieldValues[networkId] || {}, connected: true }),
+    })
+    const d = await res.json()
+    if (d.success) setNetworkStatuses(prev => ({ ...prev, [networkId]: true }))
+    if (d.error === "setup_required") setSetupSql(d.sql)
+    setSaving(null)
+  }
+
+  const handleDisconnect = async (networkId: string) => {
+    setSaving(networkId)
+    await fetch("/api/admin/ad-networks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ networkId, connected: false }),
+    })
+    setNetworkStatuses(prev => ({ ...prev, [networkId]: false }))
+    setSaving(null)
+  }
+
+  const setField = (networkId: string, fieldKey: string, value: string) => {
+    setFieldValues(prev => ({ ...prev, [networkId]: { ...prev[networkId], [fieldKey]: value } }))
+  }
 
   const adNetworks = [
     {
@@ -1539,7 +1609,6 @@ function AdNetworksContent() {
       name: "Google AdMob",
       logo: "🟢",
       description: "Rewarded video ads from Google",
-      status: "disconnected",
       fields: [
         { key: "appId", label: "App ID", placeholder: "ca-app-pub-xxxxx~xxxxx" },
         { key: "rewardedUnitId", label: "Rewarded Ad Unit ID", placeholder: "ca-app-pub-xxxxx/xxxxx" },
@@ -1551,7 +1620,6 @@ function AdNetworksContent() {
       name: "Unity Ads",
       logo: "🎮",
       description: "High eCPM rewarded video ads",
-      status: "connected",
       fields: [
         { key: "gameId", label: "Game ID", placeholder: "1234567" },
         { key: "rewardedPlacementId", label: "Rewarded Placement ID", placeholder: "rewardedVideo" },
@@ -1563,7 +1631,6 @@ function AdNetworksContent() {
       name: "AppLovin MAX",
       logo: "🔷",
       description: "Mediation platform with high fill rate",
-      status: "disconnected",
       fields: [
         { key: "sdkKey", label: "SDK Key", placeholder: "xxxxx-xxxxx-xxxxx" },
         { key: "rewardedAdUnitId", label: "Rewarded Ad Unit ID", placeholder: "xxxxx" },
@@ -1576,7 +1643,6 @@ function AdNetworksContent() {
       name: "ironSource",
       logo: "🟠",
       description: "Full mediation with offerwall support",
-      status: "disconnected",
       fields: [
         { key: "appKey", label: "App Key", placeholder: "xxxxxxx" },
         { key: "rewardedPlacementName", label: "Rewarded Placement Name", placeholder: "DefaultRewardedVideo" },
@@ -1588,7 +1654,6 @@ function AdNetworksContent() {
       name: "Meta Audience Network",
       logo: "🔵",
       description: "Facebook rewarded video ads",
-      status: "disconnected",
       fields: [
         { key: "appId", label: "App ID", placeholder: "xxxxx" },
         { key: "rewardedPlacementId", label: "Rewarded Placement ID", placeholder: "xxxxx_xxxxx" },
@@ -1600,7 +1665,6 @@ function AdNetworksContent() {
       name: "Vungle",
       logo: "🟣",
       description: "Premium video ads network",
-      status: "disconnected",
       fields: [
         { key: "appId", label: "App ID", placeholder: "xxxxx" },
         { key: "rewardedPlacementId", label: "Rewarded Placement ID", placeholder: "REWARDED-xxxxx" },
@@ -1612,7 +1676,6 @@ function AdNetworksContent() {
       name: "Chartboost",
       logo: "📊",
       description: "Gaming-focused ad network",
-      status: "disconnected",
       fields: [
         { key: "appId", label: "App ID", placeholder: "xxxxx" },
         { key: "appSignature", label: "App Signature", placeholder: "xxxxx" },
@@ -1624,7 +1687,6 @@ function AdNetworksContent() {
       name: "Mintegral",
       logo: "🟡",
       description: "Global ad network with AI optimization",
-      status: "disconnected",
       fields: [
         { key: "appId", label: "App ID", placeholder: "xxxxx" },
         { key: "appKey", label: "App Key", placeholder: "xxxxx" },
@@ -1636,7 +1698,6 @@ function AdNetworksContent() {
       name: "Monetag",
       logo: "💰",
       description: "Multi-format ads: Push, Popunder, Interstitial",
-      status: "disconnected",
       fields: [
         { key: "siteId", label: "Site ID", placeholder: "xxxxx" },
         { key: "pushZoneId", label: "Push Zone ID", placeholder: "xxxxx" },
@@ -1647,22 +1708,43 @@ function AdNetworksContent() {
     },
   ]
 
+  const connectedCount = Object.values(networkStatuses).filter(Boolean).length
+
   return (
     <div className="space-y-6">
+      {setupSql && (
+        <div className="rounded-lg border border-warning/50 bg-warning/10 p-4 space-y-2">
+          <p className="text-sm font-medium text-warning flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            Database table missing. Run this SQL in your Supabase SQL Editor to enable saving:
+          </p>
+          <pre className="text-xs bg-secondary/80 p-3 rounded overflow-auto text-foreground whitespace-pre-wrap">{setupSql}</pre>
+          <Button size="sm" variant="outline" onClick={() => navigator.clipboard.writeText(setupSql)}>
+            Copy SQL
+          </Button>
+        </div>
+      )}
+
       <div className="flex items-center justify-between">
         <div>
           <h3 className="text-lg font-semibold">Ad Networks Integration</h3>
           <p className="text-sm text-muted-foreground">Connect your ad networks to monetize video views</p>
         </div>
-        <Badge variant="outline" className="border-success text-success">
-          1 Connected
-        </Badge>
+        {isLoadingNets ? (
+          <Badge variant="outline" className="border-muted-foreground text-muted-foreground">Loading...</Badge>
+        ) : (
+          <Badge variant="outline" className={connectedCount > 0 ? "border-success text-success" : "border-muted-foreground text-muted-foreground"}>
+            {connectedCount} Connected
+          </Badge>
+        )}
       </div>
 
       <div className="grid gap-4 md:grid-cols-2">
-        {adNetworks.map((network) => (
-          <Card 
-            key={network.id} 
+        {adNetworks.map((network) => {
+          const isConnected = networkStatuses[network.id] ?? false
+          return (
+          <Card
+            key={network.id}
             className={cn(
               "glass-card cursor-pointer transition-all hover:border-primary/50",
               activeNetwork === network.id && "border-primary ring-1 ring-primary/50"
@@ -1683,11 +1765,11 @@ function AdNetworksContent() {
                 <Badge
                   variant="outline"
                   className={cn(
-                    network.status === "connected" && "border-success text-success",
-                    network.status === "disconnected" && "border-muted-foreground text-muted-foreground"
+                    isConnected && "border-success text-success",
+                    !isConnected && "border-muted-foreground text-muted-foreground"
                   )}
                 >
-                  {network.status}
+                  {isConnected ? "connected" : "disconnected"}
                 </Badge>
               </div>
 
@@ -1695,11 +1777,11 @@ function AdNetworksContent() {
                 <div className="mt-4 space-y-3 border-t border-border pt-4">
                   {network.fields.map((field) => (
                     <div key={field.key} className="space-y-1.5">
-                      <label className="text-xs font-medium text-muted-foreground">
-                        {field.label}
-                      </label>
+                      <label className="text-xs font-medium text-muted-foreground">{field.label}</label>
                       <Input
                         placeholder={field.placeholder}
+                        value={fieldValues[network.id]?.[field.key] ?? ""}
+                        onChange={(e) => { e.stopPropagation(); setField(network.id, field.key, e.target.value) }}
                         className="h-9 bg-secondary/50 font-mono text-sm"
                         onClick={(e) => e.stopPropagation()}
                       />
@@ -1709,16 +1791,18 @@ function AdNetworksContent() {
                     <Button
                       className="primary-gradient flex-1"
                       size="sm"
-                      onClick={(e) => e.stopPropagation()}
+                      disabled={saving === network.id}
+                      onClick={(e) => { e.stopPropagation(); handleConnect(network.id) }}
                     >
-                      {network.status === "connected" ? "Update" : "Connect"}
+                      {saving === network.id ? "Saving..." : isConnected ? "Update" : "Connect"}
                     </Button>
-                    {network.status === "connected" && (
+                    {isConnected && (
                       <Button
                         variant="outline"
                         size="sm"
                         className="border-destructive text-destructive hover:bg-destructive/10"
-                        onClick={(e) => e.stopPropagation()}
+                        disabled={saving === network.id}
+                        onClick={(e) => { e.stopPropagation(); handleDisconnect(network.id) }}
                       >
                         Disconnect
                       </Button>
@@ -1728,7 +1812,8 @@ function AdNetworksContent() {
               )}
             </CardContent>
           </Card>
-        ))}
+          )
+        })}
       </div>
 
       {/* Ad Priority Settings */}
@@ -1742,7 +1827,7 @@ function AdNetworksContent() {
           </p>
           <div className="space-y-2">
             {adNetworks
-              .filter((n) => n.status === "connected")
+              .filter((n) => networkStatuses[n.id])
               .map((network, index) => (
                 <div
                   key={network.id}
@@ -1756,12 +1841,12 @@ function AdNetworksContent() {
                     <span className="font-medium text-foreground">{network.name}</span>
                   </div>
                   <div className="flex items-center gap-4">
-                    <span className="text-sm text-muted-foreground">eCPM: $12.50</span>
-                    <span className="text-sm text-success">98% fill</span>
+                    <span className="text-sm text-muted-foreground">Active</span>
+                    <span className="text-sm text-success">Connected</span>
                   </div>
                 </div>
               ))}
-            {adNetworks.filter((n) => n.status === "connected").length === 0 && (
+            {connectedCount === 0 && (
               <p className="text-center py-8 text-muted-foreground">
                 No ad networks connected yet. Connect at least one network above.
               </p>

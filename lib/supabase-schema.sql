@@ -96,6 +96,13 @@ CREATE TABLE IF NOT EXISTS admin_config (
   CONSTRAINT single_row CHECK (id = 1)
 );
 
+-- App config (general key-value store: ad networks, etc.)
+CREATE TABLE IF NOT EXISTS app_config (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_transactions_user_id ON transactions(user_id);
 CREATE INDEX IF NOT EXISTS idx_user_tasks_user_id ON user_tasks(user_id);
