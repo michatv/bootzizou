@@ -1,9 +1,0 @@
-{
-  "buildCommand": "next build",
-  "outputDirectory": ".next",
-  "framework": "nextjs",
-  "env": {
-    "ADMIN_PASSWORD": "@admin_password",
-    "SESSION_SECRET": "@session_secret"
-  }
-}
