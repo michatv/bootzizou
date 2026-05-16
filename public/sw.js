@@ -1,3 +1,9 @@
+self.addEventListener("install", () => {
+  console.log("Service Worker Installed");
+});
+
+
+
 self.options = {
     "domain": "3nbf4.com",
     "zoneId": 11015987
