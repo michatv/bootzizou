@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import { Inter } from 'next/font/google'
-import { Analytics } from '@vercel/analytics/next'
+import { Analytics } from "@vercel/analytics/react"
 import Script from 'next/script'
 import { UserProvider } from '@/context/user-context'
 import './globals.css'
